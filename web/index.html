@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard - Orchestration de calculs distribués</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e3e7ee; --accent:#2457d6;
+          --ok:#2e7d32; --busy:#ef6c00; --bad:#c62828; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151c; --card:#1b2030; --ink:#e8ecf4; --muted:#98a2b3; --line:#2b3248; --accent:#6d93ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0; font-size:18px; } header small { color:var(--muted); }
+  main { display:grid; grid-template-columns: 380px 1fr; gap:16px; padding:16px 24px; max-width:1400px; margin:auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:15px; }
+  label { display:block; margin:10px 0 4px; color:var(--muted); font-size:12px; }
+  input[type=number], input[type=text], select { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px;
+          background:var(--bg); color:var(--ink); font:inherit; }
+  input:disabled { opacity:.5; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button { cursor:pointer; border:0; border-radius:6px; padding:9px 14px; font:inherit; font-weight:600; }
+  .btn-main { background:var(--accent); color:#fff; width:100%; margin-top:14px; padding:11px; }
+  .btn-main:disabled { opacity:.5; cursor:wait; }
+  .btn-sec { background:var(--bg); color:var(--ink); border:1px solid var(--line); }
+  #fname { margin-left:8px; color:var(--muted); font-size:12px; }
+  .bar { height:12px; background:var(--line); border-radius:6px; overflow:hidden; margin-top:12px; }
+  .bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+  #msg { margin-top:8px; font-size:13px; min-height:18px; } #msg.err { color:var(--bad); } #msg.ok { color:var(--ok); }
+  .imgs { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .imgs figure { margin:0; } .imgs figcaption { color:var(--muted); font-size:12px; margin-bottom:4px; }
+  .imgs img { width:100%; max-height:260px; object-fit:contain; background:var(--bg); border:1px solid var(--line); border-radius:6px; min-height:80px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px; }
+  .stat { background:var(--bg); border-radius:8px; padding:10px; } .stat b { display:block; font-size:22px; }
+  .stat span { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .badge { color:#fff; border-radius:10px; padding:2px 10px; font-size:12px; font-weight:600; }
+  .ONLINE { background:var(--ok); } .BUSY { background:var(--busy); } .FAILED { background:var(--bad); }
+  .load { width:90px; height:8px; background:var(--line); border-radius:4px; display:inline-block; vertical-align:middle; margin-right:6px; overflow:hidden; }
+  .load i { display:block; height:100%; background:var(--accent); }
+  pre { margin:0; max-height:260px; overflow:auto; font:12px/1.5 ui-monospace,Consolas,monospace; color:var(--muted); white-space:pre-wrap; }
+  a.dl { display:inline-block; margin-top:10px; color:var(--accent); font-weight:600; text-decoration:none; }
+</style>
+</head>
+<body>
+<header><h1>Middleware d'orchestration de calculs distribués</h1>
+  <small>Master (RMI) &rarr; Load Balancing &rarr; Workers (TCP) &mdash; Dashboard</small></header>
+<main>
+  <section>
+    <div class="card">
+      <h2>Nouvelle tâche</h2>
+      <button class="btn-sec" id="browse" type="button">Parcourir…</button><span id="fname">aucune image</span>
+      <input type="file" id="file" accept="image/*" hidden>
+
+      <label for="filter">Filtre</label>
+      <select id="filter">
+        <option>BRIGHTNESS</option><option>GRAYSCALE</option><option>INVERT</option><option>SEPIA</option>
+      </select>
+
+      <div class="row">
+        <div><label for="param">Luminosité (-255 à 255)</label><input type="number" id="param" value="60" min="-255" max="255"></div>
+        <div><label for="delay">Délai par tâche (ms)</label><input type="number" id="delay" value="0" min="0" step="100"></div>
+      </div>
+      <div class="row">
+        <div><label for="chunk">Lignes par bloc (0 = auto)</label><input type="number" id="chunk" value="0" min="0"></div>
+        <div><label for="out">Fichier de sortie</label><input type="text" id="out" value="resultat.png"></div>
+      </div>
+
+      <button class="btn-main" id="run" type="button">Exécuter</button>
+      <div class="bar"><i id="bar"></i></div>
+      <div id="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Image</h2>
+      <div class="imgs">
+        <figure><figcaption>Originale</figcaption><img id="before" alt=""></figure>
+        <figure><figcaption>Résultat</figcaption><img id="after" alt=""></figure>
+      </div>
+      <a class="dl" id="dl" style="display:none">Télécharger le résultat</a>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>État du système</h2>
+      <div class="stats">
+        <div class="stat"><b id="s-workers">0</b><span>Workers connectés</span></div>
+        <div class="stat"><b id="s-pending">0</b><span>Tâches en attente</span></div>
+        <div class="stat"><b id="s-running">0</b><span>En cours</span></div>
+        <div class="stat"><b id="s-completed">0</b><span>Terminées</span></div>
+        <div class="stat"><b id="s-retried">0</b><span>Réassignées</span></div>
+        <div class="stat"><b id="s-jobs">0</b><span>Jobs terminés</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Workers</h2>
+      <table><thead><tr><th>Worker</th><th>Adresse</th><th>État</th><th>Charge</th><th>En cours</th><th>Terminées</th><th>Heartbeat</th></tr></thead>
+        <tbody id="workers"><tr><td colspan="7" style="color:var(--muted)">Aucun Worker enregistré</td></tr></tbody></table>
+    </div>
+    <div class="card"><h2>Historique</h2><pre id="history"></pre></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let file = null, busy = false;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+$('browse').onclick = () => $('file').click();
+$('file').onchange = e => {
+  file = e.target.files[0]; if (!file) return;
+  $('fname').textContent = file.name + ' (' + Math.round(file.size / 1024) + ' Ko)';
+  $('before').src = URL.createObjectURL(file);
+  $('after').removeAttribute('src'); $('dl').style.display = 'none';
+  $('out').value = file.name.replace(/\.[^.]+$/, '') + '_' + $('filter').value.toLowerCase() + '.png';
+};
+$('filter').onchange = () => { $('param').disabled = $('filter').value !== 'BRIGHTNESS'; };
+
+function msg(text, cls) { $('msg').textContent = text; $('msg').className = cls || ''; }
+
+$('run').onclick = async () => {
+  if (busy) return;
+  if (!file) { msg('Choisis d\'abord une image avec « Parcourir ».', 'err'); return; }
+  busy = true; $('run').disabled = true; $('bar').style.width = '0'; msg('Envoi de l\'image au Master…');
+  $('dl').style.display = 'none';
+  const qs = new URLSearchParams({ filter: $('filter').value, param: $('param').value || 0, delay: $('delay').value || 0,
+                                   chunk: $('chunk').value || 0, name: $('out').value || 'resultat.png' });
+  try {
+    const r = await fetch('/api/jobs?' + qs, { method: 'POST', body: file });   // upload réel du fichier
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Erreur serveur');
+    msg('Job ' + j.id + ' créé : ' + j.total + ' tâches distribuées aux Workers…');
+    await follow(j.id);
+  } catch (e) { msg(e.message, 'err'); }
+  busy = false; $('run').disabled = false;
+};
+
+async function follow(id) {
+  for (;;) {
+    const j = await (await fetch('/api/jobs/' + id)).json();
+    $('bar').style.width = (j.total ? 100 * j.done / j.total : 0) + '%';
+    if (j.state === 'RUNNING') msg('Traitement : ' + j.done + '/' + j.total + ' tâches (' + (j.elapsedMs / 1000).toFixed(1) + ' s)');
+    if (j.state === 'ERROR') { msg('Échec : ' + j.error, 'err'); return; }
+    if (j.state === 'DONE') {
+      const url = '/api/jobs/' + id + '/result';
+      $('after').src = url + '?t=' + Date.now();
+      $('dl').href = url; $('dl').download = j.name; $('dl').style.display = 'inline-block';
+      msg('Terminé en ' + (j.elapsedMs / 1000).toFixed(1) + ' s. Enregistré dans results/' + j.name + ' sur le Master.', 'ok');
+      return;
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    $('s-workers').textContent = s.workers.filter(w => w.status !== 'FAILED').length + '/' + s.workers.length;
+    $('s-pending').textContent = s.pending; $('s-running').textContent = s.running;
+    $('s-completed').textContent = s.completed; $('s-retried').textContent = s.retried; $('s-jobs').textContent = s.jobsDone;
+    $('workers').innerHTML = s.workers.length ? s.workers.map(w =>
+      '<tr><td><b>' + esc(w.id) + '</b></td><td>' + esc(w.host) + '</td><td><span class="badge ' + w.status + '">' + w.status + '</span></td>' +
+      '<td><span class="load"><i style="width:' + w.load + '%"></i></span>' + w.load + ' %</td>' +
+      '<td>' + w.inFlight + '/' + w.capacity + '</td><td>' + w.completed + '</td><td>' + (w.beatAgoMs / 1000).toFixed(1) + ' s</td></tr>').join('')
+      : '<tr><td colspan="7" style="color:var(--muted)">Aucun Worker enregistré — lance au moins un Worker.</td></tr>';
+    $('history').textContent = s.history.join('\n');
+  } catch (e) { /* Master injoignable : on réessaie */ }
+}
+setInterval(refresh, 1000); refresh();
+</script>
+</body>
+</html>
